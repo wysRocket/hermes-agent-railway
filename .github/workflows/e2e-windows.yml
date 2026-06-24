@@ -192,7 +192,7 @@ jobs:
           # Note: stderr is intentionally left attached to the console so it is
           # captured in the step log. Do NOT redirect a stream we don't drain --
           # ffmpeg's progress output would fill the pipe buffer and block.
-          Write-Host "ffmpeg recording started (pid $($ffmpeg.Id))"
+          Write-Host "ffmpeg recording started (pid $($ffmpeg.Id ))"
 
           $installerSuccess = $false
           try {
@@ -200,8 +200,12 @@ jobs:
             $proc = Start-Process -FilePath $installer -PassThru -NoNewWindow
             $proc.Id | Out-File installer.pid
 
+            $e2eDir = $env:RUNNER_TEMP\e2e-windows
+
+            Copy-Item -Path "$env:INSTALL_DIR\e2e\windows"  -Destination $e2eDir 
+
             $ahkProc = Start-Process -FilePath ".\test-bins\autohotkey\AutoHotkey64.exe" `
-              -ArgumentList "$env:INSTALL_DIR\e2e\windows\install-hermes-desktop.ahk", "$PWD\ahk.log" -PassThru -NoNewWindow
+              -ArgumentList "$e2eDir\install-hermes-desktop.ahk", "$PWD\ahk.log" -PassThru -NoNewWindow
 
             # Wait for AHK helper to finish, and tail logs.
 
