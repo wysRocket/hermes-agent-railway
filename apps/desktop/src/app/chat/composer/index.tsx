@@ -60,6 +60,7 @@ import {
   updateQueuedPrompt
 } from '@/store/composer-queue'
 import { $statusItemsBySession } from '@/store/composer-status'
+import { $gateway } from '@/store/gateway'
 import { notify } from '@/store/notifications'
 import { $previewStatusBySession } from '@/store/preview-status'
 import { listRepoBranches, requestStartWorkSession, startWorkInRepo, switchBranchInRepo } from '@/store/projects'
@@ -84,6 +85,7 @@ import {
   onComposerInsertRefsRequest,
   onComposerInsertRequest,
   onComposerSubmitRequest,
+  onComposerVoiceStartRequest,
   onComposerVoiceToggleRequest
 } from './focus'
 import { HelpHint } from './help-hint'
@@ -2020,6 +2022,34 @@ export function ChatBar({
   }, [conversation, disabled, voiceConversationActive])
 
   useEffect(() => onComposerVoiceToggleRequest(toggleVoiceConversation), [toggleVoiceConversation])
+
+  // "Hey Hermes" wake word: an explicit START (idempotent) so a freshly-opened
+  // session begins back-and-forth voice without toggling an active one off.
+  const startVoiceConversation = useCallback(() => {
+    if (!disabled && !voiceConversationActive) {
+      setVoiceConversationActive(true)
+    }
+  }, [disabled, voiceConversationActive])
+
+  useEffect(() => onComposerVoiceStartRequest(startVoiceConversation), [startVoiceConversation])
+
+  // Hand the mic between the server-side wake detector and the browser's voice
+  // loop: pause the detector while a conversation is live, resume it after
+  // (no-ops server-side when the wake word isn't armed).
+  const wakePausedRef = useRef(false)
+  useEffect(() => {
+    const gw = $gateway.get()
+    if (!gw) {
+      return
+    }
+    if (voiceConversationActive) {
+      wakePausedRef.current = true
+      void gw.request('wake.pause', {}).catch(() => undefined)
+    } else if (wakePausedRef.current) {
+      wakePausedRef.current = false
+      void gw.request('wake.resume', {}).catch(() => undefined)
+    }
+  }, [voiceConversationActive])
 
   const contextMenu = (
     <ContextMenu
