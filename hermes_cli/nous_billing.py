@@ -496,3 +496,123 @@ def get_subscription_state(*, timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any
     return _request("GET", "/api/billing/subscription", timeout=timeout)
 
 
+# =============================================================================
+# Subscription change (V3) — preview + the pending-change resource + upgrade
+# =============================================================================
+#
+# Mutating the plan splits into a chargeless lane and the single money route:
+#   - preview  → a quote (no mutation, no charge) of what a change would do.
+#   - PUT/DELETE pending-change → schedule / clear a downgrade or cancellation
+#     (chargeless; takes effect at period end).
+#   - POST upgrade → the ONE route that charges (prorate + charge the card on the
+#     subscription + flip the plan, in one Stripe op).
+# All require the ``billing:manage`` scope (a 403 insufficient_scope raises
+# :class:`BillingScopeRequired`, driving the device step-up) — including preview,
+# which issues live Stripe calls and reveals charge amounts.
+
+
+def post_subscription_preview(
+    *, subscription_type_id: str, timeout: float = DEFAULT_TIMEOUT
+) -> dict[str, Any]:
+    """``POST /api/billing/subscription/preview`` — a chargeless effect quote.
+
+    Quotes a change to ``subscription_type_id`` without mutating anything:
+    ``effect`` is ``charge_now`` (an upgrade → ``amountDueNowCents`` is the prorated
+    upfront charge), ``scheduled`` (a downgrade → ``effectiveAt`` is period end),
+    ``no_op`` (already on the tier), or ``blocked`` (``reason`` says why the commit
+    would be refused). Also returns the current + target tier and the monthly-credit
+    delta. ``amountDueNowCents`` is ``None`` when not a charge or when the proration
+    quote is unavailable. Requires ``billing:manage`` (live Stripe calls + amounts).
+    """
+    return _request(
+        "POST",
+        "/api/billing/subscription/preview",
+        body={"subscriptionTypeId": subscription_type_id},
+        timeout=timeout,
+    )
+
+
+def put_subscription_pending_change(
+    *,
+    subscription_type_id: str | None = None,
+    cancel: bool = False,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """``PUT /api/billing/subscription/pending-change`` — set the end-of-period intent.
+
+    A subscription has at most one pending disposition. Pass ``cancel=True`` to
+    schedule a cancellation, or a ``subscription_type_id`` to schedule a downgrade /
+    same-price change. UPGRADES are rejected here (they charge immediately — use
+    :func:`post_subscription_upgrade`). Chargeless; requires ``billing:manage``.
+    Returns ``{rail, changeType, targetTierName, message}`` for a tier change, or
+    ``{rail, cancelAtPeriodEnd, message}`` for a cancellation.
+    """
+    if cancel:
+        body: dict[str, Any] = {"type": "cancellation"}
+    else:
+        if not (
+            isinstance(subscription_type_id, str) and subscription_type_id.strip()
+        ):
+            raise BillingError(
+                "A subscription tier is required to schedule a plan change.",
+                error="invalid_subscription_type",
+            )
+        body = {
+            "type": "tier_change",
+            "subscriptionTypeId": subscription_type_id.strip(),
+        }
+    return _request(
+        "PUT",
+        "/api/billing/subscription/pending-change",
+        body=body,
+        timeout=timeout,
+    )
+
+
+def delete_subscription_pending_change(
+    *, timeout: float = DEFAULT_TIMEOUT
+) -> dict[str, Any]:
+    """``DELETE /api/billing/subscription/pending-change`` — clear it (resume / undo).
+
+    Removes a scheduled downgrade OR cancellation in one call, restoring the live
+    active tier and recurring renewal. Chargeless, but it re-enables recurring
+    spend, so it requires ``billing:manage`` and is honored by the org kill-switch.
+    Returns ``{rail, cancelAtPeriodEnd: false, message}``.
+    """
+    return _request(
+        "DELETE",
+        "/api/billing/subscription/pending-change",
+        timeout=timeout,
+    )
+
+
+def post_subscription_upgrade(
+    *,
+    subscription_type_id: str,
+    idempotency_key: str,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """``POST /api/billing/subscription/upgrade`` — immediate paid upgrade.
+
+    The SINGLE money route: one Stripe op prorates, charges the card already on the
+    subscription, and flips the plan. ``Idempotency-Key`` is MANDATORY (a missing
+    header is a server 400, not a default) — reuse the same key on retry so a replay
+    cannot double-charge. Returns ``{status:"upgraded"|"already_on_tier", ...}`` on
+    success, or ``{status:"requires_action"|"payment_failed", reason, recoveryUrl}``
+    when the charge needs 3DS / was declined and must be finished in the portal at
+    ``recoveryUrl``. Requires ``billing:manage``.
+    """
+    if not (isinstance(idempotency_key, str) and idempotency_key.strip()):
+        raise BillingError(
+            "Idempotency-Key is required for an upgrade.",
+            error="idempotency_key_required",
+        )
+    return _request(
+        "POST",
+        "/api/billing/subscription/upgrade",
+        body={"subscriptionTypeId": subscription_type_id},
+        extra_headers={"Idempotency-Key": idempotency_key.strip()},
+        timeout=timeout,
+    )
+
+
