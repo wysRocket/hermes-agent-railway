@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  billingDevFixtures,
   endpointUnavailableBilling,
   endpointUnavailableSubscription,
   loggedOutBillingState,
@@ -13,6 +14,43 @@ import {
   todaySubscriptionState
 } from './fixtures.test-util'
 import { buildManageSubscriptionUrl, deriveBillingView } from './use-billing-state'
+
+function usageRowFor(fixtureName: keyof typeof billingDevFixtures, rowId: 'monthly_cap' | 'subscription_credits') {
+  const fixture = billingDevFixtures[fixtureName]
+  const view = deriveBillingView(fixture.billing, fixture.subscription)
+
+  return view.usageRows.find(row => row.id === rowId)
+}
+
+function subscriptionCreditsRowForRemaining(remaining: string) {
+  const view = deriveBillingView(
+    okBilling(todayBillingState),
+    okSubscription({
+      ...todaySubscriptionState,
+      current: { ...todaySubscriptionState.current, credits_remaining: remaining, monthly_credits: '220' }
+    })
+  )
+
+  return view.usageRows.find(row => row.id === 'subscription_credits')
+}
+
+function monthlyCapRowForSpent(spent: string) {
+  const view = deriveBillingView(
+    okBilling({
+      ...todayBillingState,
+      monthly_cap: {
+        is_default_ceiling: false,
+        limit_display: '$100',
+        limit_usd: '100',
+        spent_display: `$${spent}`,
+        spent_this_month_usd: spent
+      }
+    }),
+    okSubscription(todaySubscriptionState)
+  )
+
+  return view.usageRows.find(row => row.id === 'monthly_cap')
+}
 
 describe('deriveBillingView', () => {
   it('derives the deployed-today shape with fail-open disabled charge controls', () => {
@@ -99,6 +137,62 @@ describe('deriveBillingView', () => {
     const row = view.usageRows.find(r => r.id === 'subscription_credits')
     expect(row?.value).toBe('$0 of $220 left · $0.79 over')
     expect(row?.bar?.value).toBe(0)
+  })
+
+  it('marks subscription remaining bars as ok above 10% and danger at or below 10%', () => {
+    const elevenPercent = subscriptionCreditsRowForRemaining('24.2')
+
+    expect(elevenPercent?.bar?.state).toBe('ok')
+    expect(elevenPercent?.bar?.value).toBeCloseTo(0.11)
+    expect(usageRowFor('healthy', 'subscription_credits')?.bar).toMatchObject({
+      state: 'ok',
+      value: 0.6
+    })
+
+    // Owner wording is "green until 10%, then red"; the exact 10% boundary is red.
+    expect(usageRowFor('boundary', 'subscription_credits')?.bar).toMatchObject({
+      state: 'danger',
+      value: 0.1
+    })
+
+    expect(usageRowFor('low', 'subscription_credits')?.bar).toMatchObject({
+      state: 'danger',
+      value: 0.09
+    })
+  })
+
+  it('marks empty or overdrawn subscription bars as danger with a full danger track', () => {
+    const row = usageRowFor('empty-overdrawn', 'subscription_credits')
+
+    expect(row?.value).toBe('$0 of $220 left · $0.79 over')
+    expect(row?.bar).toMatchObject({
+      state: 'danger',
+      track: 'danger',
+      value: 0
+    })
+  })
+
+  it('marks monthly cap bars as neutral below 90% and danger at or above 90%', () => {
+    expect(usageRowFor('healthy', 'monthly_cap')?.bar).toMatchObject({
+      state: 'ok',
+      value: 0.89
+    })
+
+    expect(monthlyCapRowForSpent('90')?.bar).toMatchObject({
+      state: 'danger',
+      value: 0.9
+    })
+
+    expect(usageRowFor('cap-near', 'monthly_cap')?.bar).toMatchObject({
+      state: 'danger',
+      value: 0.92
+    })
+
+    expect(usageRowFor('cap-hit', 'monthly_cap')?.bar).toMatchObject({
+      state: 'danger',
+      track: 'danger',
+      value: 1
+    })
   })
 })
 

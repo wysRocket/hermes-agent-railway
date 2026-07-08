@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  billingDevFixtures,
   loggedOutBillingState,
   loggedOutSubscriptionState,
   okBilling,
@@ -223,5 +224,16 @@ describe('BillingSettings', () => {
     expect(screen.getByText('Run /portal in the TUI or open the Nous portal to connect your account.')).toBeTruthy()
     expect(screen.queryByText('Payment method')).toBeNull()
     expect(screen.queryByText('Usage')).toBeNull()
+  })
+
+  it('renders danger value text for overdrawn subscription credits', async () => {
+    const fixture = billingDevFixtures['empty-overdrawn']
+
+    apiMocks.fetchBillingState.mockResolvedValue(fixture.billing)
+    apiMocks.fetchSubscriptionState.mockResolvedValue(fixture.subscription)
+
+    renderBilling()
+
+    expect((await screen.findByText('$0 of $220 left · $0.79 over')).classList.contains('text-destructive')).toBe(true)
   })
 })

@@ -61,7 +61,9 @@ export interface BillingAccountRowView {
 export interface BillingUsageRowView {
   bar?: {
     label: string
+    state: 'danger' | 'ok'
     tone: 'cap' | 'subscription'
+    track?: 'danger'
     value: number
   }
   caption: string
@@ -78,21 +80,23 @@ export interface BillingView {
   usageRows: BillingUsageRowView[]
 }
 
-export function useBillingState() {
+export function useBillingState(enabled = true) {
   const api = useBillingApi()
 
   return useQuery({
     ...BILLING_QUERY_OPTIONS,
+    enabled,
     queryFn: () => api.fetchBillingState(),
     queryKey: ['billing', 'state']
   })
 }
 
-export function useSubscriptionState() {
+export function useSubscriptionState(enabled = true) {
   const api = useBillingApi()
 
   return useQuery({
     ...BILLING_QUERY_OPTIONS,
+    enabled,
     queryFn: () => api.fetchSubscriptionState(),
     queryKey: ['billing', 'subscription']
   })
@@ -348,13 +352,17 @@ function deriveUsageRows(
         : `${formatMoney(remaining)} of ${formatMoney(monthly)} left`
       : (usage?.subscription_remaining_display ?? usage?.plan_bar?.remaining_display ?? EMPTY_BILLING_VALUE)
 
+  const remainingFraction = remaining != null && monthly != null && monthly > 0 ? remaining / monthly : null
+
   rows.push({
     bar:
-      remaining != null && monthly != null && monthly > 0
+      remainingFraction != null
         ? {
             label: 'Subscription credits remaining',
+            state: remainingFraction <= 0.1 ? 'danger' : 'ok',
             tone: 'subscription',
-            value: clamp01(remaining / monthly)
+            track: remaining != null && remaining <= 0 ? 'danger' : undefined,
+            value: clamp01(remainingFraction)
           }
         : undefined,
     caption: `Resets ${formatBillingDate(current?.cycle_ends_at ?? usage?.renews_at)}`,
@@ -375,15 +383,18 @@ function deriveUsageRows(
   if (cap && cap.limit_usd != null) {
     const limit = parseAmount(cap.limit_usd)
     const spent = parseAmount(cap.spent_this_month_usd) ?? 0
+    const usedFraction = limit != null && limit > 0 ? spent / limit : null
     const value = `${cap.spent_display || formatMoney(spent)} of ${cap.limit_display || formatMoney(limit)} used`
 
     rows.push({
       bar:
-        limit != null && limit > 0
+        usedFraction != null
           ? {
               label: 'Monthly spend cap used',
+              state: usedFraction >= 0.9 ? 'danger' : 'ok',
               tone: 'cap',
-              value: clamp01(spent / limit)
+              track: usedFraction >= 1 ? 'danger' : undefined,
+              value: clamp01(usedFraction)
             }
           : undefined,
       caption: cap.is_default_ceiling ? 'Default ceiling' : 'Monthly terminal billing spend',

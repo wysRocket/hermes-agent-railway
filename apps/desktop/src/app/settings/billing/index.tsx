@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { BarChart3, ExternalLink } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 
@@ -10,6 +11,7 @@ import { ListRow, Pill, SectionHeading, SettingsContent } from '../primitives'
 
 import type { BillingRefusal } from './api'
 import { useBillingApi } from './api'
+import { type BillingDevFixtureName, billingDevFixtures } from './dev-fixtures'
 import { resolveRefusal } from './errors'
 import type { BillingAutoReload, BillingStateResponse } from './types'
 import {
@@ -25,6 +27,12 @@ import { useChargeFlow } from './use-charge-poller'
 import { useStepUpFlow } from './use-step-up'
 
 const FEATURE_BILLING_INVOICES = false
+
+const BILLING_DEV_FIXTURE_NAMES = import.meta.env.DEV
+  ? (Object.keys(billingDevFixtures) as BillingDevFixtureName[])
+  : []
+
+type BillingFixtureSelection = 'live' | BillingDevFixtureName
 
 function openExternal(url?: string) {
   if (!url) {
@@ -552,18 +560,33 @@ function InlineMessage({ children, kind }: { children: string; kind: 'error' | '
 }
 
 function UsageBar({ bar }: { bar: NonNullable<BillingUsageRowView['bar']> }) {
+  const width = Math.round(bar.value * 100)
+
   return (
     <div
       aria-label={bar.label}
       aria-valuemax={100}
       aria-valuemin={0}
-      aria-valuenow={Math.round(bar.value * 100)}
-      className="h-[5px] w-full overflow-hidden rounded-full bg-muted"
+      aria-valuenow={width}
+      className={cn(
+        'h-1.5 w-full overflow-hidden rounded-full',
+        bar.track === 'danger' ? 'bg-destructive/15' : 'bg-(--ui-bg-quaternary)'
+      )}
       role="progressbar"
     >
       <div
-        className={cn('h-full rounded-full', bar.tone === 'subscription' ? 'bg-primary' : 'bg-muted-foreground/45')}
-        style={{ width: `${Math.round(bar.value * 100)}%` }}
+        className={cn(
+          'h-full rounded-full transition-[width] duration-300',
+          bar.state === 'danger'
+            ? 'bg-destructive'
+            : bar.tone === 'subscription'
+              ? 'bg-(--ui-green)'
+              : 'bg-muted-foreground/45'
+        )}
+        style={{
+          minWidth: bar.value > 0 ? 4 : undefined,
+          width: `${width}%`
+        }}
       />
     </div>
   )
@@ -581,7 +604,12 @@ function UsageRow({ row }: { row: BillingUsageRowView }) {
             {row.caption}
           </div>
         </div>
-        <div className="shrink-0 text-right text-[length:var(--conversation-text-font-size)] font-medium text-foreground">
+        <div
+          className={cn(
+            'shrink-0 text-right text-[length:var(--conversation-text-font-size)] font-medium',
+            row.bar?.state === 'danger' ? 'text-destructive' : 'text-foreground'
+          )}
+        >
           {row.value}
         </div>
       </div>
@@ -594,15 +622,70 @@ function UsageRow({ row }: { row: BillingUsageRowView }) {
   )
 }
 
-export function BillingSettings() {
-  const billingState = useBillingState()
-  const subscriptionState = useSubscriptionState()
-  const view = deriveBillingView(billingState.data, subscriptionState.data)
-  const billing = billingState.data?.ok ? billingState.data.data : undefined
+function BillingFixtureSelect({
+  onValueChange,
+  value
+}: {
+  onValueChange: (value: BillingFixtureSelection) => void
+  value: BillingFixtureSelection
+}) {
+  return (
+    <Select onValueChange={value => onValueChange(value as BillingFixtureSelection)} value={value}>
+      <SelectTrigger aria-label="Billing fixture" className="h-7 w-40" size="sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end">
+        <SelectItem value="live">live</SelectItem>
+        {BILLING_DEV_FIXTURE_NAMES.map(name => (
+          <SelectItem key={name} value={name}>
+            {name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function BillingHeader({
+  fixtureName,
+  onFixtureChange
+}: {
+  fixtureName?: BillingFixtureSelection
+  onFixtureChange?: (value: BillingFixtureSelection) => void
+}) {
+  return (
+    <div className="mb-2.5 flex items-center justify-between gap-3 pt-2 text-[length:var(--conversation-text-font-size)] font-medium">
+      <div className="flex min-w-0 items-center gap-2">
+        <BarChart3 className="size-4 shrink-0 text-muted-foreground" />
+        <span>Billing</span>
+      </div>
+      {import.meta.env.DEV && fixtureName && onFixtureChange ? (
+        <BillingFixtureSelect onValueChange={onFixtureChange} value={fixtureName} />
+      ) : null}
+    </div>
+  )
+}
+
+function BillingSettingsContent({
+  fixtureName,
+  onFixtureChange
+}: {
+  fixtureName?: BillingFixtureSelection
+  onFixtureChange?: (value: BillingFixtureSelection) => void
+}) {
+  const fixture =
+    import.meta.env.DEV && fixtureName && fixtureName !== 'live' ? billingDevFixtures[fixtureName] : undefined
+
+  const billingState = useBillingState(!fixture)
+  const subscriptionState = useSubscriptionState(!fixture)
+  const billingResult = fixture?.billing ?? billingState.data
+  const subscriptionResult = fixture?.subscription ?? subscriptionState.data
+  const view = deriveBillingView(billingResult, subscriptionResult)
+  const billing = billingResult?.ok ? billingResult.data : undefined
 
   return (
     <SettingsContent>
-      <SectionHeading icon={BarChart3} title="Billing" />
+      <BillingHeader fixtureName={fixtureName} onFixtureChange={onFixtureChange} />
 
       <div className="@container mb-5">
         <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-4 @2xl:grid-cols-3">
@@ -638,6 +721,20 @@ export function BillingSettings() {
       }
     </SettingsContent>
   )
+}
+
+function BillingSettingsWithDevFixtures() {
+  const [fixtureName, setFixtureName] = useState<BillingFixtureSelection>('live')
+
+  return <BillingSettingsContent fixtureName={fixtureName} onFixtureChange={setFixtureName} />
+}
+
+export function BillingSettings() {
+  if (import.meta.env.DEV) {
+    return <BillingSettingsWithDevFixtures />
+  }
+
+  return <BillingSettingsContent />
 }
 
 function clampAmount(raw: string, billing: Pick<BillingStateResponse, 'max_usd' | 'min_usd'>): string {
