@@ -337,11 +337,12 @@ function BuyCreditsRow({ billing, row }: { billing: BillingStateResponse; row: B
   const [amount, setAmount] = useState(initialAmount)
   const flow = useChargeFlow()
   const busy = flow.phase === 'charging' || flow.phase === 'polling'
+  const controlsDisabled = busy || !billing.card
   const clampedAmount = clampAmount(amount, billing)
-  const canBuy = !busy && clampedAmount !== ''
+  const canBuy = !controlsDisabled && clampedAmount !== ''
 
   const startBuy = () => {
-    if (!clampedAmount) {
+    if (!canBuy) {
       return
     }
 
@@ -356,7 +357,7 @@ function BuyCreditsRow({ billing, row }: { billing: BillingStateResponse; row: B
           {presets.map(preset => (
             <Button
               aria-pressed={amount === preset.amount}
-              disabled={busy}
+              disabled={controlsDisabled}
               key={preset.amount}
               onClick={() => setAmount(preset.amount)}
               size="sm"
@@ -369,7 +370,7 @@ function BuyCreditsRow({ billing, row }: { billing: BillingStateResponse; row: B
           <Input
             aria-label="Custom credit amount"
             className="h-8 w-24"
-            disabled={busy}
+            disabled={controlsDisabled}
             inputMode="decimal"
             max={billing.max_usd ?? undefined}
             min={billing.min_usd ?? undefined}
@@ -560,32 +561,39 @@ function InlineMessage({ children, kind }: { children: string; kind: 'error' | '
   )
 }
 
-function UsageBar({ bar }: { bar: NonNullable<BillingUsageRowView['bar']> }) {
-  const width = Math.round(bar.value * 100)
+function UsageBar({ bar, fallbackLabel }: { bar?: BillingUsageRowView['bar']; fallbackLabel: string }) {
+  const resolvedBar = bar ?? {
+    label: `${fallbackLabel} usage`,
+    state: 'neutral',
+    tone: 'topup',
+    value: 0
+  }
+
+  const width = Math.round(resolvedBar.value * 100)
 
   return (
     <div
-      aria-label={bar.label}
+      aria-label={resolvedBar.label}
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={width}
       className={cn(
         'h-1.5 w-full overflow-hidden rounded-full',
-        bar.track === 'danger' ? 'bg-destructive/15' : 'bg-(--ui-bg-quaternary)'
+        resolvedBar.track === 'danger' ? 'bg-destructive/15' : 'bg-(--ui-bg-quaternary)'
       )}
       role="progressbar"
     >
       <div
         className={cn(
           'h-full rounded-full transition-[width] duration-300',
-          bar.state === 'danger'
+          resolvedBar.state === 'danger'
             ? 'bg-destructive'
-            : bar.state === 'ok' && (bar.tone === 'subscription' || bar.tone === 'topup')
+            : resolvedBar.state === 'ok' && (resolvedBar.tone === 'subscription' || resolvedBar.tone === 'topup')
               ? 'bg-(--ui-green)'
               : 'bg-muted-foreground/45'
         )}
         style={{
-          minWidth: bar.value > 0 ? 4 : undefined,
+          minWidth: resolvedBar.value > 0 ? 4 : undefined,
           width: `${width}%`
         }}
       />
@@ -605,7 +613,9 @@ function UsageRow({ row }: { row: BillingUsageRowView }) {
             {row.caption}
           </div>
         </div>
-        <div className="min-w-0">{row.bar && <UsageBar bar={row.bar} />}</div>
+        <div className="min-w-0">
+          <UsageBar bar={row.bar} fallbackLabel={row.title} />
+        </div>
         <div
           className={cn(
             'min-w-0 text-[length:var(--conversation-text-font-size)] font-medium @2xl:text-right',

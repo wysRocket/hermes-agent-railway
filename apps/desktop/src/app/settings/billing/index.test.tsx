@@ -99,6 +99,26 @@ describe('BillingSettings', () => {
     expect(screen.getByRole('button', { name: /^Buy$/ }).hasAttribute('disabled')).toBe(false)
   })
 
+  it('disables buy controls when no card is on file', async () => {
+    const fixture = billingDevFixtures['no-card']
+
+    apiMocks.fetchBillingState.mockResolvedValue(fixture.billing)
+    apiMocks.fetchSubscriptionState.mockResolvedValue(fixture.subscription)
+
+    renderBilling()
+
+    expect(await screen.findByText('No card on file')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '$25' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '$50' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '$100' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('spinbutton', { name: 'Custom credit amount' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: /^Buy$/ }).hasAttribute('disabled')).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Buy$/ }))
+
+    expect(apiMocks.charge).not.toHaveBeenCalled()
+  })
+
   it('saves enabled auto-refill edits and refreshes billing state', async () => {
     const client = renderBilling()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -236,6 +256,22 @@ describe('BillingSettings', () => {
     renderBilling()
 
     expect((await screen.findByText('$0 of $220 left · $0.79 over')).classList.contains('text-destructive')).toBe(true)
+  })
+
+  it('renders an empty neutral usage track when a row has no bar data', async () => {
+    const fixture = billingDevFixtures['no-subscription']
+
+    apiMocks.fetchBillingState.mockResolvedValue(fixture.billing)
+    apiMocks.fetchSubscriptionState.mockResolvedValue(fixture.subscription)
+
+    renderBilling()
+
+    await screen.findByText('Subscription credits')
+    const subscriptionTrack = screen.getByRole('progressbar', { name: 'Subscription credits usage' })
+
+    expect(subscriptionTrack.getAttribute('aria-valuenow')).toBe('0')
+    expect(subscriptionTrack.classList.contains('bg-destructive/15')).toBe(false)
+    expect(subscriptionTrack.classList.contains('bg-(--ui-bg-quaternary)')).toBe(true)
   })
 
   it('refreshes both billing queries from the usage refresh button', async () => {

@@ -94,6 +94,20 @@ describe('deriveBillingView', () => {
     })
   })
 
+  it('keeps buy credit controls visible but disabled when no card is on file', () => {
+    const fixture = billingDevFixtures['no-card']
+    const view = deriveBillingView(fixture.billing, fixture.subscription)
+    const buyCredits = view.accountRows.find(row => row.id === 'buy_credits')
+
+    expect(buyCredits).toMatchObject({
+      action: { disabled: true, label: 'Buy' },
+      description:
+        '💳 No saved card for terminal charges yet. Set one up on the portal ' +
+        "(one-time credit buys don't save a reusable card)."
+    })
+    expect(buyCredits?.chips?.map(chip => chip.disabled)).toEqual([true, true, true])
+  })
+
   it('derives a calm logged-out card with no account or usage rows', () => {
     const view = deriveBillingView(okBilling(loggedOutBillingState), okSubscription(loggedOutSubscriptionState))
 

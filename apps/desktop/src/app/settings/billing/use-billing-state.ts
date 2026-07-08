@@ -298,6 +298,20 @@ function subscriptionRow(
 }
 
 function buyCreditsRow(billing: BillingStateResponse): BillingAccountRowView {
+  if (!billing.card) {
+    return {
+      action: { disabled: true, label: 'Buy' },
+      chips: billing.charge_presets.map(amount => ({ disabled: true, label: formatMoney(amount) })),
+      description: resolveRefusal({
+        kind: 'no_payment_method',
+        message: '',
+        portalUrl: billing.portal_url ?? undefined
+      }).message,
+      id: 'buy_credits',
+      title: 'Buy credits'
+    }
+  }
+
   const disabledReason = buyCreditsDisabledReason(billing)
 
   if (disabledReason) {
