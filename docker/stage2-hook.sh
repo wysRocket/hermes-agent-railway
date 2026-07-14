@@ -406,6 +406,9 @@ seed_one() {
 seed_one ".env" ".env.example"
 seed_one "config.yaml" "cli-config.yaml.example"
 seed_one "SOUL.md" "docker/SOUL.md"
+# Ensure the just-seeded SOUL.md is readable by the hermes user.
+# cont-init.d runs as root; s6 services that read SOUL.md run as hermes.
+chown hermes:hermes "$HERMES_HOME/SOUL.md" 2>/dev/null || true
 
 # .env holds API keys and secrets — restrict to owner-only access. Applied
 # unconditionally (not only on first-seed) so a host-mounted .env that was
