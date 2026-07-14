@@ -61,6 +61,13 @@ export HOME=/opt/data
 _hermes_orig_cwd="${HERMES_ORIG_CWD:-$PWD}"
 
 cd /opt/data
+
+# Re-chown after Railway volume mount — stage2-hook runs before the
+# volume is bound, so its chown misses the mounted tree.
+if [ "$(id -u)" = 0 ] && [ -d "$HERMES_HOME" ]; then
+    chown -R hermes:hermes "$HERMES_HOME" 2>/dev/null ||         echo "[main-wrapper] Warning: post-mount chown failed"
+fi
+
 # shellcheck disable=SC1091
 . /opt/hermes/.venv/bin/activate
 
